@@ -1,0 +1,76 @@
+name: AlertSense CI/CD
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint check (syntax validation)
+        run: |
+          python -m py_compile database_app.py
+          python -m py_compile backend_app.py
+          python -m py_compile frontend_app.py
+          python -m py_compile correlator.py
+
+      - name: Build Docker image (database service)
+        run: docker build -f Dockerfile.database -t database-service:ci .
+
+      - name: Build Docker image (backend service)
+        run: docker build -f Dockerfile.backend -t backend-service:ci .
+
+      - name: Build Docker image (frontend service)
+        run: docker build -f Dockerfile.frontend -t frontend-service:ci .
+
+      - name: Build Docker image (correlator)
+        run: docker build -f Dockerfile.correlator -t alertsense-correlator:ci .
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          password: ${{ secrets.VM_PASSWORD }}
+          script: |
+            cd ~/AlertSense-AIOps
+            git pull origin main
+
+            docker build -f Dockerfile.database -t database-service:v1 .
+            docker build -f Dockerfile.backend -t backend-service:v1 .
+            docker build -f Dockerfile.frontend -t frontend-service:v1 .
+            docker build -f Dockerfile.correlator -t alertsense-correlator:v1 .
+
+            docker save database-service:v1 -o database-service.tar
+            docker save backend-service:v1 -o backend-service.tar
+            docker save frontend-service:v1 -o frontend-service.tar
+            docker save alertsense-correlator:v1 -o correlator.tar
+
+            sudo ctr -n k8s.io images import database-service.tar
+            sudo ctr -n k8s.io images import backend-service.tar
+            sudo ctr -n k8s.io images import frontend-service.tar
+            sudo ctr -n k8s.io images import correlator.tar
+
+            kubectl rollout restart deployment database-service
+            kubectl rollout restart deployment backend-service
+            kubectl rollout restart deployment frontend-service
+            kubectl rollout restart deployment alertsense-correlator
