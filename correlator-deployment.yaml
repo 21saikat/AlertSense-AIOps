@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertsense-correlator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertsense-correlator
+  template:
+    metadata:
+      labels:
+        app: alertsense-correlator
+    spec:
+      containers:
+      - name: alertsense-correlator
+        image: alertsense-correlator:v1
+        imagePullPolicy: Never
+        envFrom:
+        - secretRef:
+            name: azure-openai-secret
